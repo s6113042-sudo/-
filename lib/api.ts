@@ -1,12 +1,5 @@
 /**
  * GoalFlow API 層
- *
- * 設計原則：
- * - 前後端介面透過此檔案隔離
- * - NEXT_PUBLIC_USE_MOCK=true → localStorage mock 實作
- * - NEXT_PUBLIC_USE_MOCK=false → Sui 鏈上呼叫（lib/sui-client.ts）
- *
- * 換成真實後端只需替換各 service 的實作，Store 層完全不感知。
  */
 
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addDays, addMonths, setDate, nextDay, type Day } from 'date-fns'
@@ -16,8 +9,7 @@ import type {
   AchievementType, TxCategory, RecurringExpense, RecurringFrequency,
 } from '@/types'
 import {
-  ACHIEVEMENTS, TX_CATEGORIES, XP_PER_LEVEL,
-  BASE_CHECKIN_XP, GOAL_COMPLETE_XP,
+  ACHIEVEMENTS, TX_CATEGORIES, XP_PER_LEVEL, calcLevelInfo,
 } from './constants'
 
 // ─── localStorage keys ───────────────────────
@@ -110,6 +102,7 @@ export const txService = {
     const list = load<Transaction[]>(KEYS.transactions, [])
     const tx: Transaction = {
       ...data,
+      comment: (data.comment ?? ''),
       id:   crypto.randomUUID(),
       date: format(new Date(data.timestampMs), 'yyyy-MM-dd'),
     }
@@ -121,6 +114,15 @@ export const txService = {
   delete(id: string) {
     const list = load<Transaction[]>(KEYS.transactions, []).filter(t => t.id !== id)
     save(KEYS.transactions, list)
+  },
+
+  updateComment(id: string, comment: string): Transaction | null {
+    const list = load<Transaction[]>(KEYS.transactions, [])
+    const idx  = list.findIndex(t => t.id === id)
+    if (idx === -1) return null
+    list[idx] = { ...list[idx], comment }
+    save(KEYS.transactions, list)
+    return list[idx]
   },
 
   getCalendarData(year: number, month: number): CalendarData {
@@ -173,56 +175,151 @@ const DEFAULT_REWARDS: RewardAccount = {
   streakDays: 0, maxStreak: 0, lastCheckinDay: 0, totalCheckins: 0,
   hasCheckedInToday: false, petStage: 'egg', petXp: 0,
   badges: [], pendingCashback: 0,
+  dailyTxXp: 0, dailyTxDate: '', weeklyChestStreak: 0, usdcBalance: 0,
 }
 
-function todayDayIndex() { return Math.floor(Date.now() / 86400000) }
+function todayDayIndex() { return Math.floor((Date.now() + 8 * 3600_000) / 86_400_000) }
 
 function calcPetStage(level: number): RewardAccount['petStage'] {
-  if (level >= 20) return 'legend'
-  if (level >= 10) return 'chicken'
-  if (level >= 4)  return 'chick'
+  if (level >= 10) return 'legend'
+  if (level >= 6)  return 'chicken'
+  if (level >= 3)  return 'chick'
   return 'egg'
+}
+
+// 生成寶箱獎勵，期望值 ≈ 0.3 USDC
+function generateChestReward(): number {
+  const r = Math.random()
+  let reward: number
+  if (r < 0.45) {
+    reward = 0.01 + Math.random() * 0.14   // 45%: 0.01-0.15, avg 0.08
+  } else if (r < 0.80) {
+    reward = 0.15 + Math.random() * 0.35   // 35%: 0.15-0.50, avg 0.325
+  } else {
+    reward = 0.50 + Math.random() * 0.50   // 20%: 0.50-1.00, avg 0.75
+  }
+  // Expected ≈ 0.45×0.08 + 0.35×0.325 + 0.20×0.75 ≈ 0.30
+  return Math.round(reward * 100) / 100
 }
 
 export const rewardService = {
   get(): RewardAccount {
     const r = load<RewardAccount>(KEYS.rewards, DEFAULT_REWARDS)
+    // 補上可能沒有的新欄位（舊存檔相容）
+    r.dailyTxXp         = r.dailyTxXp         ?? 0
+    r.dailyTxDate       = r.dailyTxDate        ?? ''
+    r.weeklyChestStreak = r.weeklyChestStreak  ?? 0
+    r.usdcBalance       = r.usdcBalance        ?? 0
+
+    const info = calcLevelInfo(r.xp)
+    r.level          = info.level
+    r.xpToNextLevel  = info.xpForLevel - info.xpInLevel
+    r.petStage       = calcPetStage(r.level)
     r.hasCheckedInToday = r.lastCheckinDay === todayDayIndex()
-    r.xpToNextLevel     = r.level * XP_PER_LEVEL - r.xp
-    r.petStage          = calcPetStage(r.level)
     return r
   },
 
   checkIn(): { xpEarned: number; pointsEarned: number; newStreak: number } {
     const r = load<RewardAccount>(KEYS.rewards, DEFAULT_REWARDS)
+    r.dailyTxXp         = r.dailyTxXp         ?? 0
+    r.dailyTxDate       = r.dailyTxDate        ?? ''
+    r.weeklyChestStreak = r.weeklyChestStreak  ?? 0
+    r.usdcBalance       = r.usdcBalance        ?? 0
+
     const today = todayDayIndex()
     if (r.lastCheckinDay === today) throw new Error('已簽到')
 
-    r.streakDays    = r.lastCheckinDay + 1 === today ? r.streakDays + 1 : 1
+    const consecutive = r.lastCheckinDay + 1 === today
+    r.streakDays    = consecutive ? r.streakDays + 1 : 1
     r.maxStreak     = Math.max(r.maxStreak, r.streakDays)
     r.lastCheckinDay = today
     r.totalCheckins += 1
 
-    let xp = BASE_CHECKIN_XP
-    let pts = 5
-    if (r.streakDays >= 100) { xp += 100; pts += 50; r.pendingCashback += 20 }
-    else if (r.streakDays >= 30) { xp += 40; pts += 20; r.pendingCashback += 10 }
-    else if (r.streakDays >= 7)  { xp += 15; pts += 10; r.pendingCashback += 3  }
+    // 週期寶箱計數
+    r.weeklyChestStreak = consecutive ? r.weeklyChestStreak + 1 : 1
 
-    r.xp      += xp
-    r.points  += pts
-    r.petXp   += xp
-    r.level    = Math.floor(r.xp / XP_PER_LEVEL) + 1
+    const xp  = 5     // 簽到給少量 XP
+    const pts = 5
+    r.xp     += xp
+    r.points += pts
+    r.petXp  += xp
+
+    const info = calcLevelInfo(r.xp)
+    r.level    = info.level
     r.petStage = calcPetStage(r.level)
 
     // 自動解鎖成就
-    if (r.streakDays === 7)  rewardService._unlockBadge(r, 'STREAK_7')
-    if (r.streakDays === 30) rewardService._unlockBadge(r, 'STREAK_30')
-    if (r.petStage === 'chick'   && !r.badges.includes('PET_HATCH')) rewardService._unlockBadge(r, 'PET_HATCH')
-    if (r.petStage === 'chicken' && !r.badges.includes('PET_GROW'))  rewardService._unlockBadge(r, 'PET_GROW')
+    if (r.streakDays >= 100 && !r.badges.includes('STREAK_100'))
+      rewardService._unlockBadge(r, 'STREAK_100')
+    if (r.petStage === 'chick'   && !r.badges.includes('FIRST_LOGIN'))
+      rewardService._unlockBadge(r, 'FIRST_LOGIN')
 
     save(KEYS.rewards, r)
     return { xpEarned: xp, pointsEarned: pts, newStreak: r.streakDays }
+  },
+
+  // 每次記帳 +5 XP，單日上限 20
+  awardTransactionXp(): number {
+    const r    = load<RewardAccount>(KEYS.rewards, DEFAULT_REWARDS)
+    r.dailyTxXp   = r.dailyTxXp   ?? 0
+    r.dailyTxDate = r.dailyTxDate  ?? ''
+    const todayStr = format(new Date(Date.now() + 8 * 3600_000), 'yyyy-MM-dd')
+    if (r.dailyTxDate !== todayStr) {
+      r.dailyTxXp  = 0
+      r.dailyTxDate = todayStr
+    }
+    const remaining = Math.max(0, 20 - r.dailyTxXp)
+    const xp = Math.min(5, remaining)
+    if (xp > 0) {
+      r.xp        += xp
+      r.petXp     += xp
+      r.dailyTxXp += xp
+      const info = calcLevelInfo(r.xp)
+      r.level    = info.level
+      r.petStage = calcPetStage(r.level)
+      save(KEYS.rewards, r)
+    }
+    return xp
+  },
+
+  // 每存 1000 元 +1 XP
+  awardSavingsXp(amount: number): number {
+    const xp = Math.floor(amount / 1000)
+    if (xp <= 0) return 0
+    const r = load<RewardAccount>(KEYS.rewards, DEFAULT_REWARDS)
+    r.xp    += xp
+    r.petXp += xp
+    const info = calcLevelInfo(r.xp)
+    r.level    = info.level
+    r.petStage = calcPetStage(r.level)
+    save(KEYS.rewards, r)
+    return xp
+  },
+
+  // 目標完成 XP
+  awardGoalCompleteXp(targetAmount: number): number {
+    const xp = targetAmount < 10000 ? 10 : 25
+    const r = load<RewardAccount>(KEYS.rewards, DEFAULT_REWARDS)
+    r.xp    += xp
+    r.petXp += xp
+    const info = calcLevelInfo(r.xp)
+    r.level    = info.level
+    r.petStage = calcPetStage(r.level)
+    save(KEYS.rewards, r)
+    return xp
+  },
+
+  // 領取週寶箱（需 weeklyChestStreak >= 7）
+  claimTreasureChest(): number {
+    const r = load<RewardAccount>(KEYS.rewards, DEFAULT_REWARDS)
+    r.weeklyChestStreak = r.weeklyChestStreak ?? 0
+    r.usdcBalance       = r.usdcBalance       ?? 0
+    if (r.weeklyChestStreak < 7) throw new Error('尚未達到 7 天連續登入')
+    const reward = generateChestReward()
+    r.usdcBalance       += reward
+    r.weeklyChestStreak = 0   // 重新計數
+    save(KEYS.rewards, r)
+    return reward
   },
 
   claimCashback(): number {
@@ -250,17 +347,16 @@ export const rewardService = {
 
   awardXp(amount: number) {
     const r = load<RewardAccount>(KEYS.rewards, DEFAULT_REWARDS)
-    r.xp += amount
+    r.xp    += amount
     r.petXp += amount
-    r.level  = Math.floor(r.xp / XP_PER_LEVEL) + 1
+    const info = calcLevelInfo(r.xp)
+    r.level    = info.level
     r.petStage = calcPetStage(r.level)
     save(KEYS.rewards, r)
   },
 }
 
-// ─── 分配 / Gap Analysis ──────────────────────
-
-// ─── 固定支出 Service (Feature 2) ────────────────
+// ─── 固定支出 Service ────────────────────────────────
 
 function calcNextDueDate(frequency: RecurringFrequency, dayOf: number): string {
   const now = new Date()
@@ -269,7 +365,6 @@ function calcNextDueDate(frequency: RecurringFrequency, dayOf: number): string {
     if (d <= now) d = setDate(addMonths(now, 1), dayOf)
     return format(d, 'yyyy-MM-dd')
   } else {
-    // weekly: dayOf is 0-6 (Sun=0)
     const next = nextDay(now, dayOf as Day)
     return format(next, 'yyyy-MM-dd')
   }
@@ -338,6 +433,43 @@ export const financeService = {
           .map(g => ({ goalId: g.id, name: g.name, suggestedCut: Math.ceil(g.monthlyGap * 0.15) }))
       : []
     return { monthlyIncome: income, totalMonthlyNeed, surplus, isDeficit: surplus < 0, goalBreakdown: breakdown, recommendations }
+  },
+
+  /**
+   * 智慧分配公式
+   * 確保生活費 >= 30%、緊急備用 >= 5%
+   * 隨時間推進動態調整目標儲蓄比例，落後時加 10% 安全緩衝
+   */
+  calcAllocation(goal: Goal, monthlyIncome: number): {
+    livingPct: number
+    savingsPct: number
+    emergencyPct: number
+    investmentPct: number
+  } {
+    if (monthlyIncome <= 0 || goal.status !== 'active') {
+      return { livingPct: 60, savingsPct: 15, emergencyPct: 10, investmentPct: 15 }
+    }
+
+    const remaining   = Math.max(0, goal.targetAmount - goal.currentAmount)
+    const monthsLeft  = Math.max(1, goal.daysLeft / 30)
+    const totalDays   = Math.max(1, (goal.deadlineMs - goal.createdAt) / 86400000)
+    const daysElapsed = totalDays - goal.daysLeft
+    const expected    = goal.targetAmount * (daysElapsed / totalDays)
+    const aheadRatio  = expected > 0 ? goal.currentAmount / expected : 1
+    const progressRatio = goal.targetAmount > 0 ? goal.currentAmount / goal.targetAmount : 0
+
+    // 落後進度時加最多 10% 安全緩衝，避免市場波動影響
+    const buffer          = aheadRatio < 1 ? (1 - progressRatio) * 0.10 : 0
+    const adjustedMonthly = (remaining / monthsLeft) * (1 + buffer)
+    const rawSavingsPct   = (adjustedMonthly / monthlyIncome) * 100
+
+    const savingsPct  = Math.min(50, Math.max(10, Math.round(rawSavingsPct)))
+    const emergencyPct = Math.max(5, Math.min(10, Math.round(10 - savingsPct * 0.2)))
+    const remainingPct = 100 - savingsPct - emergencyPct
+    const livingPct    = Math.max(30, Math.round(remainingPct * 0.80))
+    const investmentPct = Math.max(0, 100 - livingPct - savingsPct - emergencyPct)
+
+    return { livingPct, savingsPct, emergencyPct, investmentPct }
   },
 
   getAllocation(): AllocationPlan | null {

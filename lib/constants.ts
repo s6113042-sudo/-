@@ -1,30 +1,29 @@
 import type { TxCategory, GoalCategory, AchievementType } from '@/types'
 
-// ─── 合約設定（換成真實部署後替換） ────────────────
+// ─── 合約設定 ─────────────────────────────────
 export const GOALFLOW_PACKAGE_ID = '0x0000000000000000000000000000000000000000000000000000000000000000'
 export const NETWORK: 'testnet' | 'mainnet' | 'devnet' = 'testnet'
 export const RPC_URL = `https://fullnode.${NETWORK}.sui.io:443`
 
 // ─── 寵物設定 ─────────────────────────────────
+// egg→lv1  chick(破殼)→lv3  chicken(小雞)→lv6  legend(雄雞)→lv10
 export const PET_STAGES = {
-  egg:     { emoji: '🥚', label: '蛋寶寶',    minLevel: 0  },
-  chick:   { emoji: '🐣', label: '小理財家',   minLevel: 4  },
-  chicken: { emoji: '🐥', label: '忠實存款者', minLevel: 10 },
-  legend:  { emoji: '🐔', label: '理財傳說',   minLevel: 20 },
+  egg:     { emoji: '🥚', label: '存錢蛋',   minLevel: 1  },
+  chick:   { emoji: '🐣', label: '破殼新芽', minLevel: 3  },
+  chicken: { emoji: '🐥', label: '理財小雞', minLevel: 6  },
+  legend:  { emoji: '🐓', label: '財富雄雞', minLevel: 10 },
 } as const
 
-// ─── 成就定義 ─────────────────────────────────
+// ─── 成就定義（6 個）─────────────────────────
 export const ACHIEVEMENTS: Record<AchievementType, {
   label: string; description: string; emoji: string; pointsReward: number
 }> = {
-  FIRST_GOAL:    { label: '目標達人',   description: '建立第一個財務目標',  emoji: '🎯', pointsReward: 30  },
-  GOAL_COMPLETE: { label: '達成成就',   description: '完成任一目標',        emoji: '🏆', pointsReward: 100 },
-  STREAK_7:      { label: '週週在線',   description: '連續簽到 7 天',       emoji: '🔥', pointsReward: 50  },
-  STREAK_30:     { label: '月度勤奮',   description: '連續簽到 30 天',      emoji: '⭐', pointsReward: 200 },
-  BUDGET_MASTER: { label: '預算大師',   description: '連續 7 天不超支',     emoji: '💹', pointsReward: 80  },
-  DEFI_USER:     { label: 'DeFi 先鋒', description: '首次啟用 DeFi 配置',  emoji: '🌐', pointsReward: 60  },
-  PET_HATCH:     { label: '蛋孵化了',   description: '寵物進化至第 2 階段', emoji: '🐣', pointsReward: 40  },
-  PET_GROW:      { label: '羽翼豐滿',   description: '寵物進化至第 3 階段', emoji: '🐥', pointsReward: 80  },
+  FIRST_LOGIN:       { label: '新手上路',   description: '第一次登入',     emoji: '🌱', pointsReward: 10  },
+  FIRST_GOAL:        { label: '目標設定者', description: '第一次設定目標', emoji: '🎯', pointsReward: 30  },
+  FIRST_TRANSACTION: { label: '記帳達人',   description: '第一次記帳',     emoji: '📝', pointsReward: 20  },
+  GOAL_COMPLETE:     { label: '時間管理師', description: '完成一個目標',   emoji: '⏰', pointsReward: 50  },
+  SAVINGS_10000:     { label: '儲蓄冠軍',   description: '累積存款 10,000',emoji: '💰', pointsReward: 80  },
+  STREAK_100:        { label: '自律大師',   description: '連續登入 100 天',emoji: '🏆', pointsReward: 200 },
 }
 
 // ─── 交易分類 ─────────────────────────────────
@@ -74,6 +73,27 @@ export const DEFI_PROTOCOLS = [
 ]
 
 // ─── XP 設定 ──────────────────────────────────
-export const XP_PER_LEVEL  = 200
-export const BASE_CHECKIN_XP = 10
-export const GOAL_COMPLETE_XP = 150
+export const XP_PER_LEVEL    = 200   // 第 1 級所需，之後每級 +50
+export const BASE_CHECKIN_XP = 0     // 簽到本身不給 XP（由記帳事件給）
+export const GOAL_COMPLETE_XP = 0    // 由 store 動態決定（<10000→+10, >=10000→+25）
+
+/**
+ * 計算等級資訊
+ * 第 1 級需 200 XP，之後每級 +50
+ */
+export function calcLevelInfo(totalXp: number): {
+  level: number
+  xpInLevel: number    // 本級已累積
+  xpForLevel: number   // 本級共需
+} {
+  let level = 1
+  let cumXp = 0
+  for (;;) {
+    const needed = 200 + (level - 1) * 50
+    if (cumXp + needed > totalXp) {
+      return { level, xpInLevel: totalXp - cumXp, xpForLevel: needed }
+    }
+    cumXp += needed
+    level++
+  }
+}

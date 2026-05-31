@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, X, Trash2, ChevronDown, TrendingUp, AlertCircle } from 'lucide-react'
+import { Plus, X, Trash2, TrendingUp, AlertCircle, ChevronDown } from 'lucide-react'
 import { useApp } from '@/lib/store'
 import { financeService } from '@/lib/api'
 import { GOAL_CATEGORIES, GOAL_COLORS, GOAL_EMOJIS } from '@/lib/constants'
@@ -10,6 +10,14 @@ import type { Goal, GoalCategory, RiskLevel } from '@/types'
 
 function fmt(n: number) {
   return n.toLocaleString('zh-TW')
+}
+
+// 分配條目顏色
+const ALLOC_COLORS = {
+  living:    '#52B788',
+  savings:   '#C8A45A',
+  emergency: '#4AABB8',
+  invest:    '#8b5cf6',
 }
 
 export function GoalsPage() {
@@ -33,19 +41,19 @@ export function GoalsPage() {
         <div className="relative z-10">
           <div className="flex items-center justify-between mb-1">
             <p className="text-green-600/70 text-xs font-semibold tracking-widest uppercase">Gap Analysis</p>
-            {/* Feature 4: 上限 3 個目標 */}
-          {activeGoals.length >= 3 ? (
-            <span className="text-xs text-amber-400 font-mono border border-amber-700/40 bg-amber-900/20 px-2.5 py-1 rounded-full">
-              已達上限 3/3
-            </span>
-          ) : (
-            <button
-              onClick={() => setCreateOpen(true)}
-              className="flex items-center gap-1 bg-green-500/20 border border-green-500/40 text-green-400 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-green-500/30 transition-colors"
-            >
-              <Plus size={12} /> 新增 ({activeGoals.length}/3)
-            </button>
-          )}
+            {/* 目標上限 1 個 */}
+            {activeGoals.length >= 1 ? (
+              <span className="text-xs text-amber-400 font-mono border border-amber-700/40 bg-amber-900/20 px-2.5 py-1 rounded-full">
+                已達上限 1/1
+              </span>
+            ) : (
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="flex items-center gap-1 bg-green-500/20 border border-green-500/40 text-green-400 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-green-500/30 transition-colors"
+              >
+                <Plus size={12} /> 新增 ({activeGoals.length}/1)
+              </button>
+            )}
           </div>
 
           <div className="flex gap-6 mt-3">
@@ -71,7 +79,6 @@ export function GoalsPage() {
             NT$ {fmt(Math.abs(gap.surplus))}
           </div>
 
-          {/* recommendations */}
           {gap.isDeficit && gap.recommendations.length > 0 && (
             <div className="mt-3 flex flex-col gap-1.5">
               <p className="text-[10px] text-green-600/60 font-semibold">建議削減</p>
@@ -87,7 +94,7 @@ export function GoalsPage() {
       </div>
 
       <div className="px-4 mt-4 flex flex-col gap-4 pb-6">
-        {/* Active goals */}
+        {/* 進行中目標 */}
         {activeGoals.length === 0 ? (
           <motion.button
             onClick={() => setCreateOpen(true)}
@@ -95,7 +102,7 @@ export function GoalsPage() {
             className="w-full rounded-2xl border-2 border-dashed border-green-300 py-10 flex flex-col items-center gap-2 text-green-500 hover:border-green-400 transition-colors mt-2"
           >
             <span className="text-4xl">🎯</span>
-            <span className="text-sm font-medium">設定你的第一個財務目標</span>
+            <span className="text-sm font-medium">設定你的財務目標</span>
             <span className="text-xs text-green-400/70">點擊開始</span>
           </motion.button>
         ) : (
@@ -105,26 +112,33 @@ export function GoalsPage() {
             </div>
             <div className="flex flex-col gap-3">
               {activeGoals.map((g, i) => (
-                <GoalCard key={g.id} goal={g} index={i} onDelete={() => actions.deleteGoal(g.id)} />
+                <GoalCard
+                  key={g.id} goal={g} index={i}
+                  onDelete={() => actions.deleteGoal(g.id)}
+                  monthlyIncome={profile.monthlyIncome}
+                />
               ))}
             </div>
           </>
         )}
 
-        {/* Completed goals */}
+        {/* 已完成目標 */}
         {completedGoals.length > 0 && (
           <>
             <h2 className="font-bold text-green-900 mt-2">已完成 ({completedGoals.length})</h2>
             <div className="flex flex-col gap-3">
               {completedGoals.map((g, i) => (
-                <GoalCard key={g.id} goal={g} index={i} onDelete={() => actions.deleteGoal(g.id)} />
+                <GoalCard
+                  key={g.id} goal={g} index={i}
+                  onDelete={() => actions.deleteGoal(g.id)}
+                  monthlyIncome={profile.monthlyIncome}
+                />
               ))}
             </div>
           </>
         )}
       </div>
 
-      {/* Create Goal Modal (bottom sheet) */}
       <CreateGoalModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   )
@@ -132,8 +146,25 @@ export function GoalsPage() {
 
 // ── GoalCard ─────────────────────────────────────────────────────
 
-function GoalCard({ goal, index, onDelete }: { goal: Goal; index: number; onDelete: () => void }) {
-  const [showDelete, setShowDelete] = useState(false)
+function GoalCard({
+  goal, index, onDelete, monthlyIncome,
+}: {
+  goal: Goal; index: number; onDelete: () => void; monthlyIncome: number
+}) {
+  const [showDelete, setShowDelete]   = useState(false)
+  const [showBreakdown, setShowBreakdown] = useState(false)
+
+  const alloc = useMemo(
+    () => financeService.calcAllocation(goal, monthlyIncome),
+    [goal, monthlyIncome],
+  )
+
+  const allocItems = [
+    { label: '生活費',   pct: alloc.livingPct,    color: ALLOC_COLORS.living },
+    { label: '目標儲蓄', pct: alloc.savingsPct,   color: ALLOC_COLORS.savings },
+    { label: '緊急備用', pct: alloc.emergencyPct, color: ALLOC_COLORS.emergency },
+    { label: '投資理財', pct: alloc.investmentPct,color: ALLOC_COLORS.invest },
+  ]
 
   return (
     <motion.div
@@ -141,10 +172,10 @@ function GoalCard({ goal, index, onDelete }: { goal: Goal; index: number; onDele
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06 }}
       className="glass-card rounded-2xl overflow-hidden"
-      onLongPress={undefined}
     >
       <div className="h-1" style={{ background: goal.color }} />
       <div className="p-4">
+        {/* 頂部 */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="text-xl">{goal.emoji}</span>
@@ -161,6 +192,13 @@ function GoalCard({ goal, index, onDelete }: { goal: Goal; index: number; onDele
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* 展開分配 */}
+            <button
+              onClick={() => setShowBreakdown(p => !p)}
+              className="text-green-600/50 hover:text-green-600 transition-colors"
+            >
+              <ChevronDown size={14} className={`transition-transform ${showBreakdown ? 'rotate-180' : ''}`} />
+            </button>
             <button
               onClick={() => setShowDelete(p => !p)}
               className="text-green-700/40 hover:text-red-400 transition-colors"
@@ -170,7 +208,7 @@ function GoalCard({ goal, index, onDelete }: { goal: Goal; index: number; onDele
           </div>
         </div>
 
-        {/* progress */}
+        {/* 進度條 */}
         <div className="h-2 rounded-full bg-green-100 overflow-hidden mb-2">
           <motion.div
             className="h-full rounded-full"
@@ -180,7 +218,6 @@ function GoalCard({ goal, index, onDelete }: { goal: Goal; index: number; onDele
             transition={{ duration: 0.8, ease: 'easeOut' }}
           />
         </div>
-
         <div className="flex justify-between text-xs font-mono">
           <span className="text-green-700">NT$ {fmt(goal.currentAmount)}</span>
           <span className="font-bold" style={{ color: goal.color }}>{goal.progressPct}%</span>
@@ -194,6 +231,40 @@ function GoalCard({ goal, index, onDelete }: { goal: Goal; index: number; onDele
           </div>
         )}
 
+        {/* ── 分配明細展開 ── */}
+        <AnimatePresence>
+          {showBreakdown && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-3 pt-3 border-t border-green-100 flex flex-col gap-2.5">
+                <p className="text-[10px] text-green-600/60 font-semibold mb-0.5">智慧分配建議（基於剩餘時間自動調整）</p>
+                {allocItems.map(item => (
+                  <div key={item.label}>
+                    <div className="flex justify-between text-[11px] mb-1">
+                      <span className="text-green-800 font-medium">{item.label}</span>
+                      <span className="font-mono font-bold" style={{ color: item.color }}>{item.pct}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-green-100 overflow-hidden">
+                      <motion.div
+                        className="h-full rounded-full"
+                        style={{ background: item.color }}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${item.pct}%` }}
+                        transition={{ duration: 0.6 }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* 刪除確認 */}
         <AnimatePresence>
           {showDelete && (
             <motion.div

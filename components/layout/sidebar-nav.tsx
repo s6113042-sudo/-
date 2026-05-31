@@ -6,12 +6,17 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useApp } from '@/lib/store'
 import { useWalletConnection } from '@mysten/dapp-kit-react'
 import { AddTransactionModal } from '@/components/shared/add-transaction-modal'
-import { LayoutDashboard, ArrowLeftRight, Plus, LogOut, Coins, Wallet, ExternalLink } from 'lucide-react'
+import {
+  LayoutDashboard, ArrowLeftRight, Plus, LogOut,
+  Coins, Wallet, ExternalLink, Star, Flame, CheckCircle,
+} from 'lucide-react'
 import { getDAppKit } from '@/lib/sui-dapp-kit'
 
 const NAV = [
   { href: '/dashboard',    label: '儀表板', Icon: LayoutDashboard },
   { href: '/transactions', label: '交易紀錄', Icon: ArrowLeftRight  },
+  { href: '/goals',        label: '財務目標', Icon: Star            },
+  { href: '/rewards',      label: '任務',    Icon: Flame            },
 ]
 
 const GOLD    = '#C8A45A'
@@ -21,29 +26,25 @@ const TEXT    = '#F0EDE6'
 const INCOME  = '#52B788'
 const EXPENSE = '#E07B5A'
 
-// ── Wallet section (client-only after hydration) ─────────────
+// ── Wallet section ───────────────────────────────────────────
 function WalletSection() {
   const kit = getDAppKit()
   const conn = useWalletConnection({ dAppKit: kit ?? undefined })
 
   if (!conn.isConnected && !conn.isConnecting) {
-    // Show connect button rendered as a web component
     return (
       <div style={{ padding: '0 14px 4px' }}>
         <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '2px', fontWeight: 600, margin: '12px 6px 6px' }}>
           SUI 錢包
         </p>
-        {/* Render native dapp-kit-core connect button via web component */}
         <button
           id="slush-connect-trigger"
           onClick={() => {
-            // Open the ConnectModal by dispatching a custom event
             const modal = document.querySelector('dapp-kit-connect-modal')
             if (modal) {
-              // @ts-ignore – web component property
+              // @ts-ignore
               modal.open = true
             } else {
-              // Fallback: try direct wallet list
               const wallets = kit?.stores.$wallets.get() ?? []
               const slush = wallets.find(w =>
                 w.name.toLowerCase().includes('slush') || w.name.toLowerCase().includes('sui')
@@ -64,7 +65,6 @@ function WalletSection() {
           <Wallet size={12} />
           連接 SLUSH 錢包
         </button>
-        {/* Render all available wallets as list */}
         <WalletList kit={kit} />
       </div>
     )
@@ -78,8 +78,7 @@ function WalletSection() {
     )
   }
 
-  // Connected state
-  const addr = conn.account?.address ?? ''
+  const addr  = conn.account?.address ?? ''
   const short = addr ? `${addr.slice(0, 8)}...${addr.slice(-6)}` : ''
 
   return (
@@ -94,10 +93,7 @@ function WalletSection() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{
-              width: '7px', height: '7px', borderRadius: '50%',
-              background: INCOME, boxShadow: `0 0 6px ${INCOME}80`,
-            }} />
+            <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: INCOME, boxShadow: `0 0 6px ${INCOME}80` }} />
             <span style={{ color: INCOME, fontSize: '10px', fontWeight: 600 }}>已連接</span>
           </div>
           <button
@@ -109,20 +105,14 @@ function WalletSection() {
             中斷
           </button>
         </div>
-        <p style={{ color: TEXT, fontSize: '11px', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-          {short}
-        </p>
+        <p style={{ color: TEXT, fontSize: '11px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{short}</p>
         {conn.wallet?.name && (
           <p style={{ color: MUTED, fontSize: '9px', marginTop: '3px' }}>{conn.wallet.name}</p>
         )}
         <a
           href={`https://suiscan.xyz/testnet/account/${addr}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: '3px',
-            color: GOLD, fontSize: '9px', marginTop: '5px', textDecoration: 'none',
-          }}
+          target="_blank" rel="noopener noreferrer"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: GOLD, fontSize: '9px', marginTop: '5px', textDecoration: 'none' }}
         >
           <ExternalLink size={9} />
           在 SuiScan 查看
@@ -132,7 +122,6 @@ function WalletSection() {
   )
 }
 
-// ── Available wallet list ────────────────────────────────────
 function WalletList({ kit }: { kit: ReturnType<typeof getDAppKit> }) {
   const [wallets, setWallets] = useState<{ name: string; icon?: string }[]>([])
 
@@ -161,8 +150,7 @@ function WalletList({ kit }: { kit: ReturnType<typeof getDAppKit> }) {
           style={{
             display: 'flex', alignItems: 'center', gap: '8px',
             padding: '7px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer',
-            background: 'rgba(255,255,255,0.03)', color: TEXT, fontSize: '11px',
-            textAlign: 'left',
+            background: 'rgba(255,255,255,0.03)', color: TEXT, fontSize: '11px', textAlign: 'left',
           }}
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(200,164,90,0.08)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
@@ -182,9 +170,10 @@ function WalletList({ kit }: { kit: ReturnType<typeof getDAppKit> }) {
 export function SidebarNav() {
   const pathname = usePathname()
   const router   = useRouter()
-  const { dispatch } = useApp()
+  const { state, dispatch, actions } = useApp()
   const [modal, setModal]     = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [checkinToast, setCheckinToast] = useState<string | null>(null)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -193,6 +182,25 @@ export function SidebarNav() {
     try { localStorage.removeItem('gf_app_state') } catch {}
     router.replace('/')
   }
+
+  async function handleCheckIn() {
+    if (state.rewards.hasCheckedInToday) return
+    try {
+      const result = await actions.checkIn()
+      setCheckinToast(`✓ 連續 ${result.newStreak} 天！`)
+      setTimeout(() => setCheckinToast(null), 2500)
+    } catch {
+      setCheckinToast('今日已簽到')
+      setTimeout(() => setCheckinToast(null), 2000)
+    }
+  }
+
+  function handleSubscribe() {
+    if (!state.profile.isSubscribed) actions.subscribe()
+  }
+
+  const alreadyCheckedIn = state.rewards.hasCheckedInToday
+  const isSubscribed     = state.profile.isSubscribed
 
   return (
     <>
@@ -208,7 +216,7 @@ export function SidebarNav() {
         <div style={{ height: '2px', background: 'linear-gradient(90deg, var(--gold), transparent 70%)', flexShrink: 0 }} />
 
         {/* Logo */}
-        <div style={{ padding: '22px 20px 18px', borderBottom: `1px solid ${BORDER}` }}>
+        <div style={{ padding: '16px 20px 12px', borderBottom: `1px solid ${BORDER}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
               width: '36px', height: '36px', borderRadius: '6px', flexShrink: 0,
@@ -223,10 +231,64 @@ export function SidebarNav() {
               <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '2px', marginTop: '1px' }}>財務管理</p>
             </div>
           </div>
+
+          {/* ── 每日簽到 + 訂閱（左上角快捷） ── */}
+          <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+            {/* 每日簽到 */}
+            <button
+              onClick={handleCheckIn}
+              title={alreadyCheckedIn ? '今日已簽到' : '每日簽到'}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: '5px', cursor: alreadyCheckedIn ? 'default' : 'pointer',
+                border: alreadyCheckedIn ? '1px solid rgba(82,183,136,0.25)' : '1px solid rgba(82,183,136,0.4)',
+                background: alreadyCheckedIn ? 'rgba(82,183,136,0.04)' : 'rgba(82,183,136,0.10)',
+                color: alreadyCheckedIn ? MUTED : INCOME,
+                fontSize: '10px', fontWeight: 600,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                transition: 'all 0.15s',
+              }}
+            >
+              {alreadyCheckedIn
+                ? <><CheckCircle size={11} /> 已簽到</>
+                : <><Flame size={11} /> 簽到</>
+              }
+            </button>
+
+            {/* 訂閱 */}
+            <button
+              onClick={handleSubscribe}
+              title={isSubscribed ? '已訂閱' : '訂閱'}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: '5px',
+                cursor: isSubscribed ? 'default' : 'pointer',
+                border: isSubscribed ? '1px solid rgba(200,164,90,0.25)' : '1px solid rgba(200,164,90,0.4)',
+                background: isSubscribed ? 'rgba(200,164,90,0.04)' : 'rgba(200,164,90,0.10)',
+                color: isSubscribed ? MUTED : GOLD,
+                fontSize: '10px', fontWeight: 600,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                transition: 'all 0.15s',
+              }}
+            >
+              <Star size={11} fill={isSubscribed ? MUTED : 'none'} />
+              {isSubscribed ? '已訂閱' : '訂閱'}
+            </button>
+          </div>
+
+          {/* Checkin toast */}
+          {checkinToast && (
+            <div style={{
+              marginTop: '6px', padding: '5px 10px', borderRadius: '4px',
+              background: 'rgba(82,183,136,0.12)', border: '1px solid rgba(82,183,136,0.25)',
+              color: INCOME, fontSize: '11px', fontWeight: 500, textAlign: 'center',
+              animation: 'fadeUp 0.2s ease',
+            }}>
+              {checkinToast}
+            </div>
+          )}
         </div>
 
         {/* New Transaction */}
-        <div style={{ padding: '16px 14px 8px' }}>
+        <div style={{ padding: '12px 14px 6px' }}>
           <button
             onClick={() => setModal(true)}
             style={{
@@ -272,7 +334,7 @@ export function SidebarNav() {
           })}
         </nav>
 
-        {/* Wallet section — only after hydration to avoid SSR mismatch */}
+        {/* Wallet section */}
         {mounted && <WalletSection />}
 
         {/* Divider */}

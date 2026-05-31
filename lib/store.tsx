@@ -5,7 +5,7 @@ import type { AppState, Goal, Transaction, AchievementType, RecurringExpense } f
 import { goalService, txService, rewardService, financeService, recurringService } from './api'
 import { format } from 'date-fns'
 
-// ─── 台灣時區當日 index (Feature 4: 00:00 台灣時間重置) ──
+// 台灣時區當日 index（00:00 台灣時間重置）
 function twDayIndex() {
   return Math.floor((Date.now() + 8 * 3600_000) / 86_400_000)
 }
@@ -17,18 +17,20 @@ const initRewards: AppState['rewards'] = {
   streakDays: 0, maxStreak: 0, lastCheckinDay: 0, totalCheckins: 0,
   hasCheckedInToday: false, petStage: 'egg', petXp: 0,
   badges: [], pendingCashback: 0,
+  dailyTxXp: 0, dailyTxDate: '', weeklyChestStreak: 0, usdcBalance: 0,
 }
 
 const initWallet: AppState['wallet'] = {
   isConnected: false, address: null, suiBalance: 0,
   network: 'testnet', profileObjectId: null, rewardObjectId: null,
   ledgerObjectId: null, isInitialized: false,
-  syncEnabled: false,  // Feature 1
+  syncEnabled: false,
 }
 
 const initProfile: AppState['profile'] = {
   address: null, monthlyIncome: 0, riskLevel: 2,
   dailyBudget: 3000, impulseCooldownHours: 24, onChainProfileId: null,
+  isSubscribed: false,
 }
 
 const INIT: AppState = {
@@ -39,7 +41,7 @@ const INIT: AppState = {
   transactions: [],
   rewards: initRewards,
   wallet: initWallet,
-  recurringExpenses: [],    // Feature 2
+  recurringExpenses: [],
 }
 
 // ─── Actions ──────────────────────────────────
@@ -53,6 +55,7 @@ export type Action =
   | { type: 'DELETE_GOAL'; payload: string }
   | { type: 'SET_TRANSACTIONS'; payload: Transaction[] }
   | { type: 'ADD_TRANSACTION'; payload: Transaction }
+  | { type: 'UPDATE_TRANSACTION'; payload: Transaction }
   | { type: 'DELETE_TRANSACTION'; payload: string }
   | { type: 'SET_REWARDS'; payload: AppState['rewards'] }
   | { type: 'UNLOCK_BADGE'; payload: AchievementType }
@@ -75,15 +78,16 @@ function reducer(state: AppState, action: Action): AppState {
         isOnboarded: true,
         profile: { ...state.profile, ...action.payload },
       }
-    case 'SET_GOALS':      return { ...state, goals: action.payload }
-    case 'ADD_GOAL':       return { ...state, goals: [...state.goals, action.payload] }
-    case 'UPDATE_GOAL':    return { ...state, goals: state.goals.map(g => g.id === action.payload.id ? action.payload : g) }
-    case 'DELETE_GOAL':    return { ...state, goals: state.goals.filter(g => g.id !== action.payload) }
-    case 'SET_TRANSACTIONS': return { ...state, transactions: action.payload }
-    case 'ADD_TRANSACTION':  return { ...state, transactions: [action.payload, ...state.transactions] }
-    case 'DELETE_TRANSACTION': return { ...state, transactions: state.transactions.filter(t => t.id !== action.payload) }
-    case 'SET_REWARDS':    return { ...state, rewards: action.payload }
-    case 'UNLOCK_BADGE':   return {
+    case 'SET_GOALS':       return { ...state, goals: action.payload }
+    case 'ADD_GOAL':        return { ...state, goals: [...state.goals, action.payload] }
+    case 'UPDATE_GOAL':     return { ...state, goals: state.goals.map(g => g.id === action.payload.id ? action.payload : g) }
+    case 'DELETE_GOAL':     return { ...state, goals: state.goals.filter(g => g.id !== action.payload) }
+    case 'SET_TRANSACTIONS':  return { ...state, transactions: action.payload }
+    case 'ADD_TRANSACTION':   return { ...state, transactions: [action.payload, ...state.transactions] }
+    case 'UPDATE_TRANSACTION':return { ...state, transactions: state.transactions.map(t => t.id === action.payload.id ? action.payload : t) }
+    case 'DELETE_TRANSACTION':return { ...state, transactions: state.transactions.filter(t => t.id !== action.payload) }
+    case 'SET_REWARDS':     return { ...state, rewards: action.payload }
+    case 'UNLOCK_BADGE':    return {
       ...state,
       rewards: {
         ...state.rewards,
@@ -92,12 +96,12 @@ function reducer(state: AppState, action: Action): AppState {
           : [...state.rewards.badges, action.payload],
       },
     }
-    case 'SET_WALLET':     return { ...state, wallet: { ...state.wallet, ...action.payload } }
-    case 'SET_ALLOCATION': return { ...state, allocation: action.payload }
-    case 'SET_PROFILE':    return { ...state, profile: { ...state.profile, ...action.payload } }
-    case 'SET_RECURRING':  return { ...state, recurringExpenses: action.payload }
-    case 'ADD_RECURRING':  return { ...state, recurringExpenses: [...state.recurringExpenses, action.payload] }
-    case 'DELETE_RECURRING': return { ...state, recurringExpenses: state.recurringExpenses.filter(r => r.id !== action.payload) }
+    case 'SET_WALLET':      return { ...state, wallet: { ...state.wallet, ...action.payload } }
+    case 'SET_ALLOCATION':  return { ...state, allocation: action.payload }
+    case 'SET_PROFILE':     return { ...state, profile: { ...state.profile, ...action.payload } }
+    case 'SET_RECURRING':   return { ...state, recurringExpenses: action.payload }
+    case 'ADD_RECURRING':   return { ...state, recurringExpenses: [...state.recurringExpenses, action.payload] }
+    case 'DELETE_RECURRING':return { ...state, recurringExpenses: state.recurringExpenses.filter(r => r.id !== action.payload) }
     default: return state
   }
 }
@@ -115,28 +119,24 @@ interface Ctx {
   dispatch: React.Dispatch<Action>
   actions: {
     onboard(data: { monthlyIncome: number; riskLevel: 1|2|3; dailyBudget: number; impulseCooldownHours: number }): void
-    // Goals — Feature 4: max 3
     createGoal(data: Parameters<typeof goalService.create>[0]): Goal | null
     deleteGoal(id: string): void
     addProgress(goalId: string, amount: number): void
-    // Transactions
     addTransaction(data: Parameters<typeof txService.add>[0]): Transaction
     deleteTransaction(id: string): void
-    // Feature 3: spending alert calculation
+    updateTransactionComment(id: string, comment: string): void
     calcSpendingAlert(amount: number, isIncome: boolean): SpendingAlert | null
-    // Rewards — Feature 4: Taiwan timezone check-in
     checkIn(): Promise<{ xpEarned: number; pointsEarned: number; newStreak: number }>
     claimCashback(): number
+    claimTreasureChest(): number
     unlockBadge(type: AchievementType): void
-    // Wallet — Feature 1
+    subscribe(): void
     connectWallet(address: string): void
     disconnectWallet(): void
     toggleWalletSync(): void
     simulateWalletIncome(amount: number): void
     simulateWalletExpense(amount: number): void
-    // Allocation
     saveAllocation(plan: AppState['allocation']): void
-    // Recurring — Feature 2
     addRecurring(data: Parameters<typeof recurringService.add>[0]): RecurringExpense
     deleteRecurring(id: string): void
   }
@@ -148,7 +148,7 @@ const AppCtx = createContext<Ctx | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, INIT)
-  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const syncIntervalRef   = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // 從 localStorage 水化狀態
   useEffect(() => {
@@ -156,13 +156,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem('gf_app_state')
       const saved = raw ? JSON.parse(raw) as Partial<AppState> : {}
       const rewards = rewardService.get()
-      // Feature 4: 修正 hasCheckedInToday 用台灣時間
       rewards.hasCheckedInToday = rewards.lastCheckinDay === twDayIndex()
       dispatch({
         type: 'HYDRATE',
         payload: {
           ...INIT,
           ...saved,
+          profile: { ...initProfile, ...(saved.profile ?? {}) },
           goals:             goalService.getAll(),
           transactions:      txService.getAll(),
           rewards,
@@ -186,18 +186,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, [state.isOnboarded, state.profile, state.wallet])
 
-  // Feature 1: 錢包自動同步 interval
+  // 錢包自動同步 interval
   useEffect(() => {
     if (state.wallet.syncEnabled && state.wallet.isConnected) {
       syncIntervalRef.current = setInterval(() => {
-        // Mock: 30% 機率模擬一筆隨機小額支出
         if (Math.random() < 0.3) {
           const cats = ['food', 'transport', 'utilities'] as const
           const cat  = cats[Math.floor(Math.random() * cats.length)]
           const amt  = Math.floor(Math.random() * 200) + 50
           const tx = txService.add({
             amount: amt, isIncome: false, category: cat,
-            note: `[錢包同步] ${cat}`, timestampMs: Date.now(),
+            note: `[錢包同步] ${cat}`, comment: '',
+            timestampMs: Date.now(),
             goalId: null, txDigest: `0x${crypto.randomUUID().replace(/-/g, '')}`, isImpulse: false,
           })
           dispatch({ type: 'ADD_TRANSACTION', payload: tx })
@@ -219,13 +219,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const actions: Ctx['actions'] = {
     onboard(data) {
       dispatch({ type: 'ONBOARD', payload: data })
+      // 解鎖新手上路徽章
+      rewardService.unlockBadge('FIRST_LOGIN')
       dispatch({ type: 'SET_REWARDS', payload: rewardService.get() })
     },
 
-    // Feature 4: max 3 active goals
+    // 上限 1 個目標
     createGoal(data) {
       const activeCount = state.goals.filter(g => g.status === 'active').length
-      if (activeCount >= 3) return null
+      if (activeCount >= 1) return null
       const g = goalService.create(data)
       dispatch({ type: 'ADD_GOAL', payload: g })
       rewardService.unlockBadge('FIRST_GOAL')
@@ -241,17 +243,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addProgress(goalId, amount) {
       const g = goalService.addProgress(goalId, amount)
       dispatch({ type: 'UPDATE_GOAL', payload: g })
+      // 存款 XP：每 1000 元 +1
+      rewardService.awardSavingsXp(amount)
       if (g.status === 'completed') {
         rewardService.unlockBadge('GOAL_COMPLETE')
-        rewardService.awardXp(150)
-        dispatch({ type: 'SET_REWARDS', payload: rewardService.get() })
+        rewardService.awardGoalCompleteXp(g.targetAmount)
+        // 儲蓄冠軍：累積存款 >= 10000
+        const totalSaved = state.goals.reduce((s, g2) => s + g2.currentAmount, 0) + amount
+        if (totalSaved >= 10000) rewardService.unlockBadge('SAVINGS_10000')
       }
+      dispatch({ type: 'SET_REWARDS', payload: rewardService.get() })
     },
 
     addTransaction(data) {
-      const tx = txService.add(data)
+      const tx = txService.add({ ...data, comment: data.comment ?? '' })
       dispatch({ type: 'ADD_TRANSACTION', payload: tx })
-      rewardService.awardXp(3)
+      // 記帳 XP：每次 +5，單日上限 +20
+      rewardService.awardTransactionXp()
+      // 第一次記帳徽章
+      if (state.transactions.length === 0) rewardService.unlockBadge('FIRST_TRANSACTION')
       dispatch({ type: 'SET_REWARDS', payload: rewardService.get() })
       return tx
     },
@@ -261,7 +271,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'DELETE_TRANSACTION', payload: id })
     },
 
-    // Feature 3: 計算此消費使目標退後幾天
+    updateTransactionComment(id, comment) {
+      const updated = txService.updateComment(id, comment)
+      if (updated) dispatch({ type: 'UPDATE_TRANSACTION', payload: updated })
+    },
+
     calcSpendingAlert(amount, isIncome) {
       if (isIncome || amount <= 0) return null
       const todayStr   = format(new Date(), 'yyyy-MM-dd')
@@ -279,7 +293,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { goalName: primary.name, setbackDays, excess }
     },
 
-    // Feature 4: 台灣時間簽到，每日 00:00 重置
+    // 台灣時間簽到，每日 00:00 重置（同時讓 連續記帳 +1）
     async checkIn() {
       const today = twDayIndex()
       const r = rewardService.get()
@@ -295,12 +309,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return pts
     },
 
+    claimTreasureChest() {
+      const usdc = rewardService.claimTreasureChest()
+      dispatch({ type: 'SET_REWARDS', payload: rewardService.get() })
+      return usdc
+    },
+
     unlockBadge(type) {
       rewardService.unlockBadge(type)
       dispatch({ type: 'SET_REWARDS', payload: rewardService.get() })
     },
 
-    // Feature 1: 錢包連接 / 斷線 / 同步切換
+    subscribe() {
+      dispatch({ type: 'SET_PROFILE', payload: { isSubscribed: true } })
+    },
+
     connectWallet(address) {
       dispatch({ type: 'SET_WALLET', payload: { isConnected: true, address } })
     },
@@ -315,7 +338,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     simulateWalletIncome(amount) {
       const tx = txService.add({
-        amount, isIncome: true, category: 'salary',
+        amount, isIncome: true, category: 'salary', comment: '',
         note: '[錢包同步] 收款', timestampMs: Date.now(),
         goalId: null, txDigest: `0x${crypto.randomUUID().replace(/-/g, '')}`, isImpulse: false,
       })
@@ -324,7 +347,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     simulateWalletExpense(amount) {
       const tx = txService.add({
-        amount, isIncome: false, category: 'other_expense',
+        amount, isIncome: false, category: 'other_expense', comment: '',
         note: '[錢包同步] 付款', timestampMs: Date.now(),
         goalId: null, txDigest: `0x${crypto.randomUUID().replace(/-/g, '')}`, isImpulse: false,
       })
@@ -338,7 +361,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_ALLOCATION', payload: plan })
     },
 
-    // Feature 2: 固定支出
     addRecurring(data) {
       const item = recurringService.add(data)
       dispatch({ type: 'ADD_RECURRING', payload: item })

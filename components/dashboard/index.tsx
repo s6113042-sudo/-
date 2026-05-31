@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useApp } from '@/lib/store'
+import type { Goal, UserProfile } from '@/types'
 import { TX_CATEGORIES } from '@/lib/constants'
 import { useWalletConnection } from '@mysten/dapp-kit-react'
 import { getDAppKit } from '@/lib/sui-dapp-kit'
@@ -18,7 +19,7 @@ import {
   format, parseISO, startOfMonth, endOfMonth, startOfYear,
   subMonths, eachDayOfInterval, addMonths, getDay, getDaysInMonth,
 } from 'date-fns'
-import { txService } from '@/lib/api'
+import { txService, financeService } from '@/lib/api'
 
 // ── Constants ────────────────────────────────────────────────
 const GOLD       = '#C8A45A'
@@ -392,6 +393,14 @@ function MiniCalendar() {
 }
 
 // ── Goal Cards ────────────────────────────────────────────────
+
+const ALLOC_INFO = [
+  { key: 'livingPct',    label: '生活費',   color: '#52B788' },
+  { key: 'savingsPct',   label: '目標儲蓄', color: '#C8A45A' },
+  { key: 'emergencyPct', label: '緊急備用', color: '#4AABB8' },
+  { key: 'investmentPct', label: '投資理財', color: '#8b5cf6' },
+] as const
+
 function GoalCards() {
   const { state } = useApp()
   const { goals, profile, transactions } = state
@@ -411,111 +420,175 @@ function GoalCards() {
     }}>
       <p style={{ fontSize: '28px', marginBottom: '8px' }}>🎯</p>
       <p style={{ color: TEXT, fontSize: '13px', fontWeight: 500, marginBottom: '4px' }}>尚無存錢目標</p>
-      <p style={{ color: MUTED, fontSize: '11px' }}>前往「財務目標」頁面新增最多 3 個目標</p>
+      <p style={{ color: MUTED, fontSize: '11px' }}>前往「財務目標」頁面新增目標</p>
     </div>
   )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {active.map(goal => {
-        const dailyNeeded  = goal.monthlyGap > 0 ? Math.ceil(goal.monthlyGap / 30) : 0
-        const remaining    = Math.max(0, goal.targetAmount - goal.currentAmount)
-        const deadlineDate = new Date(goal.deadlineMs)
-        const pct          = goal.progressPct
-        // derive bar color: use goal.color if set, fallback to gold
-        const barColor     = goal.color || GOLD
+      {active.map(goal => (
+        <GoalCardItem
+          key={goal.id}
+          goal={goal}
+          profile={profile}
+          remainingToday={remainingToday}
+          todayExpense={todayExpense}
+        />
+      ))}
+    </div>
+  )
+}
 
-        return (
-          <div key={goal.id} style={{
-            ...CARD_S,
-            padding: '22px',
-            borderLeft: `3px solid ${barColor}`,
-            position: 'relative', overflow: 'hidden',
-          }}>
-            {/* Subtle corner glow */}
-            <div style={{
-              position: 'absolute', top: 0, right: 0,
-              width: '100px', height: '100px',
-              background: `radial-gradient(circle at top right, ${barColor}10, transparent 70%)`,
-              pointerEvents: 'none',
-            }} />
+function GoalCardItem({ goal, profile, remainingToday, todayExpense }: {
+  goal: Goal
+  profile: UserProfile
+  remainingToday: number
+  todayExpense: number
+}) {
+  const [showBreakdown, setShowBreakdown] = useState(false)
 
-            {/* ── Row 1: name + deadline + pct ── */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '14px' }}>
-              <div>
-                <p style={{ color: TEXT, fontSize: '15px', fontWeight: 600 }}>
-                  {goal.emoji} {goal.name}
-                </p>
-                <p style={{ color: MUTED, fontSize: '11px', marginTop: '3px' }}>
-                  截止日期：{deadlineDate.toLocaleDateString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit' })}
-                  <span style={{ margin: '0 6px', opacity: 0.4 }}>·</span>
-                  剩餘 {goal.daysLeft} 天
-                </p>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <p style={{ fontFamily: SERIF, fontSize: '26px', fontWeight: 400, color: barColor, lineHeight: 1 }}>
-                  {pct}%
-                </p>
-                <p style={{ color: MUTED, fontSize: '10px', marginTop: '2px' }}>進度</p>
-              </div>
-            </div>
+  const dailyNeeded  = goal.monthlyGap > 0 ? Math.ceil(goal.monthlyGap / 30) : 0
+  const remaining    = Math.max(0, goal.targetAmount - goal.currentAmount)
+  const deadlineDate = new Date(goal.deadlineMs)
+  const pct          = goal.progressPct
+  const barColor     = goal.color || GOLD
 
-            {/* ── Progress bar ── */}
-            <div style={{ height: '7px', background: '#2C2920', borderRadius: '4px', overflow: 'hidden', marginBottom: '16px' }}>
-              <div style={{
-                height: '100%',
-                width: `${pct}%`,
-                background: `linear-gradient(90deg, ${barColor}99, ${barColor})`,
-                borderRadius: '4px',
-                boxShadow: `0 0 8px ${barColor}55`,
-                transition: 'width 0.6s ease',
-              }} />
-            </div>
+  const alloc = useMemo(
+    () => financeService.calcAllocation(goal, profile.monthlyIncome),
+    [goal, profile.monthlyIncome],
+  )
 
-            {/* ── Row 2: 3 stats ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '14px' }}>
-              {[
-                { label: '目前存款', value: `NT$${goal.currentAmount.toLocaleString()}`, color: TEXT },
-                { label: '目標金額', value: `NT$${goal.targetAmount.toLocaleString()}`, color: TEXT },
-                { label: '尚需金額', value: `NT$${remaining.toLocaleString()}`,         color: remaining > 0 ? EXPENSE_C : INCOME_C },
-              ].map(({ label, value, color }) => (
-                <div key={label} style={{ background: '#1A1915', borderRadius: '6px', padding: '10px 12px', border: `1px solid ${BORDER}` }}>
-                  <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '1.5px', marginBottom: '5px' }}>{label}</p>
-                  <p style={{ fontFamily: SERIF, color, fontSize: '13px' }}>{value}</p>
-                </div>
-              ))}
-            </div>
+  return (
+    <div style={{
+      ...CARD_S,
+      padding: '22px',
+      borderLeft: `3px solid ${barColor}`,
+      position: 'relative', overflow: 'hidden',
+      cursor: 'pointer',
+    }}
+      onClick={() => setShowBreakdown(v => !v)}
+    >
+      {/* Subtle corner glow */}
+      <div style={{
+        position: 'absolute', top: 0, right: 0,
+        width: '100px', height: '100px',
+        background: `radial-gradient(circle at top right, ${barColor}10, transparent 70%)`,
+        pointerEvents: 'none',
+      }} />
 
-            {/* ── Divider ── */}
-            <div style={{ height: '1px', background: BORDER, marginBottom: '14px' }} />
-
-            {/* ── Row 3: daily info ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <div style={{ background: '#1A1915', borderRadius: '6px', padding: '12px 14px', border: `1px solid ${BORDER}` }}>
-                <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '1.5px', marginBottom: '6px' }}>今日剩餘可用開銷</p>
-                <p style={{
-                  fontFamily: SERIF, fontSize: '18px', fontWeight: 600,
-                  color: remainingToday > 0 ? INCOME_C : EXPENSE_C,
-                }}>
-                  NT${remainingToday.toLocaleString()}
-                </p>
-                <p style={{ color: MUTED, fontSize: '10px', marginTop: '3px' }}>
-                  已用 NT${todayExpense.toLocaleString()} / 預算 NT${profile.dailyBudget.toLocaleString()}
-                </p>
-              </div>
-              <div style={{ background: '#1A1915', borderRadius: '6px', padding: '12px 14px', border: `1px solid ${BORDER}` }}>
-                <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '1.5px', marginBottom: '6px' }}>每日需存金額</p>
-                <p style={{ fontFamily: SERIF, fontSize: '18px', fontWeight: 600, color: barColor }}>
-                  NT${dailyNeeded.toLocaleString()}
-                </p>
-                <p style={{ color: MUTED, fontSize: '10px', marginTop: '3px' }}>
-                  每月需存 NT${goal.monthlyGap.toLocaleString()}
-                </p>
-              </div>
-            </div>
+      {/* ── Row 1: name + deadline + pct ── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '14px' }}>
+        <div>
+          <p style={{ color: TEXT, fontSize: '15px', fontWeight: 600 }}>
+            {goal.emoji} {goal.name}
+          </p>
+          <p style={{ color: MUTED, fontSize: '11px', marginTop: '3px' }}>
+            截止日期：{deadlineDate.toLocaleDateString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit' })}
+            <span style={{ margin: '0 6px', opacity: 0.4 }}>·</span>
+            剩餘 {goal.daysLeft} 天
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ fontFamily: SERIF, fontSize: '26px', fontWeight: 400, color: barColor, lineHeight: 1 }}>
+              {pct}%
+            </p>
+            <p style={{ color: MUTED, fontSize: '10px', marginTop: '2px' }}>進度</p>
           </div>
-        )
-      })}
+          <ChevronDown
+            size={16}
+            color={MUTED}
+            style={{ transform: showBreakdown ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.25s' }}
+          />
+        </div>
+      </div>
+
+      {/* ── Progress bar ── */}
+      <div style={{ height: '7px', background: '#2C2920', borderRadius: '4px', overflow: 'hidden', marginBottom: '16px' }}>
+        <div style={{
+          height: '100%',
+          width: `${pct}%`,
+          background: `linear-gradient(90deg, ${barColor}99, ${barColor})`,
+          borderRadius: '4px',
+          boxShadow: `0 0 8px ${barColor}55`,
+          transition: 'width 0.6s ease',
+        }} />
+      </div>
+
+      {/* ── Row 2: 3 stats ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '14px' }}>
+        {[
+          { label: '目前存款', value: `NT$${goal.currentAmount.toLocaleString()}`, color: TEXT },
+          { label: '目標金額', value: `NT$${goal.targetAmount.toLocaleString()}`, color: TEXT },
+          { label: '尚需金額', value: `NT$${remaining.toLocaleString()}`,         color: remaining > 0 ? EXPENSE_C : INCOME_C },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ background: '#1A1915', borderRadius: '6px', padding: '10px 12px', border: `1px solid ${BORDER}` }}>
+            <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '1.5px', marginBottom: '5px' }}>{label}</p>
+            <p style={{ fontFamily: SERIF, color, fontSize: '13px' }}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Divider ── */}
+      <div style={{ height: '1px', background: BORDER, marginBottom: '14px' }} />
+
+      {/* ── Row 3: daily info ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+        <div style={{ background: '#1A1915', borderRadius: '6px', padding: '12px 14px', border: `1px solid ${BORDER}` }}>
+          <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '1.5px', marginBottom: '6px' }}>今日剩餘可用開銷</p>
+          <p style={{
+            fontFamily: SERIF, fontSize: '18px', fontWeight: 600,
+            color: remainingToday > 0 ? INCOME_C : EXPENSE_C,
+          }}>
+            NT${remainingToday.toLocaleString()}
+          </p>
+          <p style={{ color: MUTED, fontSize: '10px', marginTop: '3px' }}>
+            已用 NT${todayExpense.toLocaleString()} / 預算 NT${profile.dailyBudget.toLocaleString()}
+          </p>
+        </div>
+        <div style={{ background: '#1A1915', borderRadius: '6px', padding: '12px 14px', border: `1px solid ${BORDER}` }}>
+          <p style={{ color: MUTED, fontSize: '9px', letterSpacing: '1.5px', marginBottom: '6px' }}>每日需存金額</p>
+          <p style={{ fontFamily: SERIF, fontSize: '18px', fontWeight: 600, color: barColor }}>
+            NT${dailyNeeded.toLocaleString()}
+          </p>
+          <p style={{ color: MUTED, fontSize: '10px', marginTop: '3px' }}>
+            每月需存 NT${goal.monthlyGap.toLocaleString()}
+          </p>
+        </div>
+      </div>
+
+      {/* ── 分配明細展開（點擊目標顯示） ── */}
+      {showBreakdown && (
+        <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${BORDER}` }}
+          onClick={e => e.stopPropagation()}
+        >
+          <p style={{ color: MUTED, fontSize: '10px', letterSpacing: '1.5px', marginBottom: '12px' }}>
+            智慧資金分配（依剩餘時間自動每日更新）
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {ALLOC_INFO.map(item => {
+              const pctVal = alloc[item.key]
+              return (
+                <div key={item.key}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: TEXT, fontSize: '12px' }}>{item.label}</span>
+                    <span style={{ color: item.color, fontSize: '12px', fontFamily: SERIF, fontWeight: 600 }}>{pctVal}%</span>
+                  </div>
+                  <div style={{ height: '5px', background: BORDER, borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${pctVal}%`,
+                      background: item.color,
+                      borderRadius: '3px',
+                      transition: 'width 0.5s ease',
+                    }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,6 +1,5 @@
 // =============================================
 // GoalFlow — 全域型別定義
-// 與 Sui Move 合約結構對應，保持欄位命名一致
 // =============================================
 
 // ─── 列舉 ────────────────────────────────────
@@ -17,12 +16,13 @@ export type TxCategory    =
 // ─── 使用者設定 ──────────────────────────────
 
 export interface UserProfile {
-  address:             string | null  // Sui 錢包地址
-  monthlyIncome:       number         // NT$
+  address:             string | null
+  monthlyIncome:       number
   riskLevel:           RiskLevel
   dailyBudget:         number
-  impulseCooldownHours: number        // 衝動冷靜期小時數
-  onChainProfileId:    string | null  // Sui UserProfile Object ID
+  impulseCooldownHours: number
+  onChainProfileId:    string | null
+  isSubscribed:        boolean        // 訂閱狀態
 }
 
 // ─── 目標 ────────────────────────────────────
@@ -38,18 +38,17 @@ export interface Goal {
   category:      GoalCategory
   status:        GoalStatus
   riskLevel:     RiskLevel
-  coolingOffUntilMs: number          // 0 = 無冷靜期
+  coolingOffUntilMs: number
   createdAt:     number
-  // 前端衍生欄位（不存鏈上）
-  progressPct:   number              // 0-100
+  progressPct:   number
   daysLeft:      number
-  monthlyGap:    number              // 每月尚需金額
-  onChainId:     string | null       // Sui Goal Object ID
+  monthlyGap:    number
+  onChainId:     string | null
 }
 
 export interface GoalAllocation {
   goalId:        string
-  basisPoints:   number              // 10000 = 100%
+  basisPoints:   number
   monthlyTarget: number
 }
 
@@ -66,7 +65,7 @@ export interface AllocationPlan {
 export interface GapAnalysis {
   monthlyIncome:    number
   totalMonthlyNeed: number
-  surplus:          number           // 負數表示赤字
+  surplus:          number
   isDeficit:        boolean
   goalBreakdown:    { goalId: string; name: string; monthlyNeed: number; pct: number }[]
   recommendations:  { goalId: string; name: string; suggestedCut: number }[]
@@ -80,11 +79,12 @@ export interface Transaction {
   isIncome:     boolean
   category:     TxCategory
   note:         string
+  comment?:     string              // 使用者自訂註釋（平時隱藏，可選）
   timestampMs:  number
   goalId:       string | null
-  txDigest:     string | null        // Sui 鏈上 tx digest
+  txDigest:     string | null
   isImpulse:    boolean
-  date:         string               // 'YYYY-MM-DD'（前端衍生）
+  date:         string
 }
 
 // ─── 月曆 ────────────────────────────────────
@@ -92,17 +92,17 @@ export interface Transaction {
 export type DayStatus = 'positive' | 'negative' | 'neutral' | 'empty'
 
 export interface DayRecord {
-  date:         string               // 'YYYY-MM-DD'
+  date:         string
   totalIncome:  number
   totalExpense: number
   net:          number
   status:       DayStatus
   transactions: Transaction[]
   goalDeposits: { goalId: string; amount: number }[]
-  targetMet:    boolean              // net >= 0
+  targetMet:    boolean
 }
 
-export type CalendarData = Record<string, DayRecord>  // key: 'YYYY-MM-DD'
+export type CalendarData = Record<string, DayRecord>
 
 export interface CategoryBreakdown {
   category: TxCategory
@@ -115,8 +115,12 @@ export interface CategoryBreakdown {
 // ─── 獎勵 ────────────────────────────────────
 
 export type AchievementType =
-  | 'FIRST_GOAL' | 'GOAL_COMPLETE' | 'STREAK_7' | 'STREAK_30'
-  | 'BUDGET_MASTER' | 'DEFI_USER' | 'PET_HATCH' | 'PET_GROW'
+  | 'FIRST_LOGIN'        // 新手上路
+  | 'FIRST_GOAL'         // 目標設定者
+  | 'FIRST_TRANSACTION'  // 記帳達人
+  | 'GOAL_COMPLETE'      // 時間管理師
+  | 'SAVINGS_10000'      // 儲蓄冠軍
+  | 'STREAK_100'         // 自律大師
 
 export interface Achievement {
   type:        AchievementType
@@ -129,19 +133,25 @@ export interface Achievement {
 }
 
 export interface RewardAccount {
-  level:           number
-  xp:              number
-  xpToNextLevel:   number
-  points:          number
-  streakDays:      number
-  maxStreak:       number
-  lastCheckinDay:  number            // day index
-  totalCheckins:   number
-  hasCheckedInToday: boolean
-  petStage:        PetStage
-  petXp:           number
-  badges:          AchievementType[]
-  pendingCashback: number
+  level:              number
+  xp:                 number
+  xpToNextLevel:      number
+  points:             number
+  streakDays:         number
+  maxStreak:          number
+  lastCheckinDay:     number
+  totalCheckins:      number
+  hasCheckedInToday:  boolean
+  petStage:           PetStage
+  petXp:              number
+  badges:             AchievementType[]
+  pendingCashback:    number
+  // 每日記帳 XP 追蹤
+  dailyTxXp:          number        // 當日已獲得的記帳 XP（上限 20）
+  dailyTxDate:        string        // 當日日期 'YYYY-MM-DD'
+  // 每週寶箱
+  weeklyChestStreak:  number        // 本週連續天數 (0-7)
+  usdcBalance:        number        // 累積 USDC 獎勵
 }
 
 // ─── 錢包 ────────────────────────────────────
@@ -155,10 +165,10 @@ export interface WalletState {
   rewardObjectId:  string | null
   ledgerObjectId:  string | null
   isInitialized:   boolean
-  syncEnabled:     boolean           // Feature 1: 自動同步開關
+  syncEnabled:     boolean
 }
 
-// ─── 固定支出 (Feature 2) ─────────────────────
+// ─── 固定支出 ─────────────────────────────────
 
 export type RecurringFrequency = 'monthly' | 'weekly'
 
@@ -169,8 +179,8 @@ export interface RecurringExpense {
   amount:       number
   category:     TxCategory
   frequency:    RecurringFrequency
-  dayOf:        number              // monthly: 1-31, weekly: 0-6 (Sun-Sat)
-  nextDueDate:  string              // 'YYYY-MM-DD'
+  dayOf:        number
+  nextDueDate:  string
   isActive:     boolean
   notes:        string
   createdAt:    number
@@ -202,7 +212,7 @@ export interface ApiResult<T> {
 export interface DeFiProtocol {
   id:          string
   name:        string
-  estimatedApy: number              // % 年化
+  estimatedApy: number
   riskLevel:   RiskLevel
   minAmount:   number
   description: string
