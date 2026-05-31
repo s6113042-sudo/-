@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+:root {
+  --bg:          #0C0B09;
+  --bg-card:     #161612;
+  --bg-sidebar:  #111109;
+  --border:      #2C2920;
+  --gold:        #C8A45A;
+  --gold-dim:    rgba(200,164,90,0.12);
+  --gold-border: rgba(200,164,90,0.3);
+  --text:        #F0EDE6;
+  --muted:       #6B6456;
+  --income:      #52B788;
+  --expense:     #E07B5A;
+  --radius:      6px;
+}
+
+@theme inline {
+  --font-sans: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', monospace;
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-border: var(--border);
+  --color-primary: var(--gold);
+}
+
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: var(--bg);
+    background-image: radial-gradient(circle at 1px 1px, rgba(200,164,90,0.055) 1px, transparent 0);
+    background-size: 28px 28px;
+    color: var(--text);
+    font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(200,164,90,0.25); color: var(--text); }
+}
+
+/* ── Serif display numbers ── */
+.serif { font-family: Georgia, 'Times New Roman', serif; }
+
+/* ── Gold card left-accent ── */
+.gold-accent-left {
+  border-left: 2px solid var(--gold) !important;
+}
+
+/* ── Hover glow on cards ── */
+.card-hover {
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.card-hover:hover {
+  border-color: var(--gold-border) !important;
+  box-shadow: 0 0 0 1px rgba(200,164,90,0.08), 0 8px 32px rgba(0,0,0,0.4);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2C2920; border-radius: 2px; }
+
+/* ── Date input dark mode ── */
+input[type='date'] { color-scheme: dark; }
+
+/* ── Select options ── */
+select option { background: #1A1915; color: #F0EDE6; }
+
+/* ── Range slider ── */
+input[type='range'] {
+  -webkit-appearance: none;
+  height: 4px; border-radius: 2px;
+  background: #2C2920; cursor: pointer;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #C8A45A; cursor: pointer;
+}
+
+/* ── Fade-in animation ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.4s ease forwards; }
+.fade-up-1 { animation: fadeUp 0.4s 0.05s ease both; }
+.fade-up-2 { animation: fadeUp 0.4s 0.1s  ease both; }
+.fade-up-3 { animation: fadeUp 0.4s 0.15s ease both; }
+.fade-up-4 { animation: fadeUp 0.4s 0.2s  ease both; }
+.fade-up-5 { animation: fadeUp 0.4s 0.25s ease both; }
+.fade-up-6 { animation: fadeUp 0.4s 0.30s ease both; }
+
+/* ── Gold shimmer on logo icon ── */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.gold-shimmer {
+  background: linear-gradient(120deg, #8B6914 0%, #E2BC6E 40%, #C8A45A 60%, #8B6914 100%);
+  background-size: 200% auto;
+  animation: shimmer 4s linear infinite;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

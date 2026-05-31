@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PATH -split \";\" | Where-Object { $_ -ne \"\" }; Write-Host \"---\"; Get-Command node -ErrorAction SilentlyContinue | Select-Object Source; Get-Command npm -ErrorAction SilentlyContinue | Select-Object Source)",
+      "PowerShell(Get-ChildItem \"C:\\\\Program Files\\\\nodejs\" -ErrorAction SilentlyContinue; Get-ChildItem \"C:\\\\Program Files \\(x86\\)\\\\nodejs\" -ErrorAction SilentlyContinue; Get-ChildItem \"$env:APPDATA\\\\npm\" -ErrorAction SilentlyContinue | Select-Object -First 5; Test-Path \"C:\\\\Users\\\\user\\\\AppData\\\\Roaming\\\\nvm\")",
+      "PowerShell($locations = @\\(\"C:\\\\Program Files\\\\nodejs\\\\node.exe\", \"C:\\\\Program Files \\(x86\\)\\\\nodejs\\\\node.exe\", \"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\", \"C:\\\\nodejs\\\\node.exe\"\\); foreach \\($l in $locations\\) { if \\(Test-Path $l\\) { Write-Host \"Found: $l\" } })",
+      "PowerShell($vscodePath = \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Programs\\\\Microsoft VS Code\"; Get-ChildItem \"$vscodePath\" -Filter \"node.exe\" -Recurse -ErrorAction SilentlyContinue -Depth 5 | Select-Object FullName | Select-Object -First 3)",
+      "PowerShell(Test-Path \"$env:LOCALAPPDATA\\\\fnm\"; Test-Path \"$env:LOCALAPPDATA\\\\volta\\\\bin\"; Test-Path \"$env:APPDATA\\\\nvm\"; Get-Command fnm -ErrorAction SilentlyContinue; Get-Command volta -ErrorAction SilentlyContinue)",
+      "PowerShell(cmd /c \"node --version\" 2>&1)",
+      "PowerShell(cmd /c \"npm --version\" 2>&1)",
+      "PowerShell(winget --version 2>&1)",
+      "PowerShell(winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements)",
+      "PowerShell($env:PATH = [System.Environment]::GetEnvironmentVariable\\('PATH','Machine'\\) + ';' + [System.Environment]::GetEnvironmentVariable\\('PATH','User'\\); git --version)"
+    ]
+  }
+}
